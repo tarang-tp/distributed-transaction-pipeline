@@ -1,0 +1,60 @@
+x-raft-node: &raft-node
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.raft-node
+  networks: [tpp]
+
+services:
+  raft-1:
+    <<: *raft-node
+    environment:
+      NODE_ID: raft-1
+      LISTEN_PORT: "50051"
+      PEER_ADDRESSES: "raft-2=raft-2:50051,raft-3=raft-3:50051,raft-4=raft-4:50051,raft-5=raft-5:50051"
+      INITIAL_BALANCES: "acct-1=1000,acct-2=1000"
+
+  raft-2:
+    <<: *raft-node
+    environment:
+      NODE_ID: raft-2
+      LISTEN_PORT: "50051"
+      PEER_ADDRESSES: "raft-1=raft-1:50051,raft-3=raft-3:50051,raft-4=raft-4:50051,raft-5=raft-5:50051"
+      INITIAL_BALANCES: "acct-1=1000,acct-2=1000"
+
+  raft-3:
+    <<: *raft-node
+    environment:
+      NODE_ID: raft-3
+      LISTEN_PORT: "50051"
+      PEER_ADDRESSES: "raft-1=raft-1:50051,raft-2=raft-2:50051,raft-4=raft-4:50051,raft-5=raft-5:50051"
+      INITIAL_BALANCES: "acct-1=1000,acct-2=1000"
+
+  raft-4:
+    <<: *raft-node
+    environment:
+      NODE_ID: raft-4
+      LISTEN_PORT: "50051"
+      PEER_ADDRESSES: "raft-1=raft-1:50051,raft-2=raft-2:50051,raft-3=raft-3:50051,raft-5=raft-5:50051"
+      INITIAL_BALANCES: "acct-1=1000,acct-2=1000"
+
+  raft-5:
+    <<: *raft-node
+    environment:
+      NODE_ID: raft-5
+      LISTEN_PORT: "50051"
+      PEER_ADDRESSES: "raft-1=raft-1:50051,raft-2=raft-2:50051,raft-3=raft-3:50051,raft-4=raft-4:50051"
+      INITIAL_BALANCES: "acct-1=1000,acct-2=1000"
+
+  coordinator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.coordinator
+    environment:
+      RAFT_ADDRESSES: "raft-1=raft-1:50051,raft-2=raft-2:50051,raft-3=raft-3:50051,raft-4=raft-4:50051,raft-5=raft-5:50051"
+      NUM_PARTITIONS: "4"
+      NUM_FRAUD_WORKERS: "3"
+    depends_on: [raft-1, raft-2, raft-3, raft-4, raft-5]
+    networks: [tpp]
+
+networks:
+  tpp:

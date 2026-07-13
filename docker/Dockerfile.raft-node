@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY common/ common/
+COPY raft/ raft/
+COPY settlement/ settlement/
+COPY coordinator/ coordinator/
+COPY docker/raft_node_entrypoint.py docker/raft_node_entrypoint.py
+
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python", "docker/raft_node_entrypoint.py"]

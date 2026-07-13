@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY common/ common/
+COPY raft/ raft/
+COPY streaming/ streaming/
+COPY fraud/ fraud/
+COPY settlement/ settlement/
+COPY coordinator/ coordinator/
+COPY docker/coordinator_entrypoint.py docker/coordinator_entrypoint.py
+
+ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["python", "docker/coordinator_entrypoint.py"]
