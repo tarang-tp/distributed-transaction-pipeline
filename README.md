@@ -1,12 +1,24 @@
 # Distributed Transaction Processing Pipeline
 
-A from-scratch distributed system that combines real-time fraud detection (stream processing) with consensus-based transaction settlement (Raft). Transactions flow through a partitioned stream, get scored for fraud in parallel by worker nodes, and clean transactions are settled through a Raft-replicated ledger that prevents double-spending on conflicting transactions — even across leader failures.
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
-Everything here is built from scratch: the partitioned log, the consumer-group rebalancing protocol, and the Raft consensus algorithm (including a PreVote extension beyond the base paper). No Kafka, no `raft` library.
+A distributed system combining real-time fraud detection with consensus-based transaction settlement. Transactions flow through a partitioned stream, get scored for fraud in parallel by worker nodes, and clean transactions are settled through a Raft-replicated ledger that prevents double-spending, including across leader failures.
 
-## Why this exists
+Built from scratch: the partitioned log, the consumer-group rebalancing protocol, and the Raft consensus algorithm (including a PreVote extension beyond the base paper). No Kafka, no `raft` library, the goal was to understand and prove correct the actual mechanics behind those tools, not just call an API.
 
-This is a systems-design deep dive, not a CRUD app. The goal was to build and prove correct, under real failure injection, the two hardest primitives in a transaction-processing system: **exactly-once-ish delivery under partition rebalancing** and **linearizable settlement under leader failure**.
+**Stack:** Python, gRPC + Protocol Buffers, pytest, Docker / Docker Compose
+
+## Quickstart
+
+```bash
+git clone https://github.com/<your-username>/distributed-transaction-pipeline.git
+cd distributed-transaction-pipeline
+pip install -r requirements-dev.txt
+pytest                              # ~74 tests, in-process + real gRPC-over-localhost
+python scripts/demo_kill_leader.py  # kill the Raft leader mid-transaction, watch it recover
+```
 
 ## Architecture
 
@@ -37,13 +49,13 @@ This is a systems-design deep dive, not a CRUD app. The goal was to build and pr
      monitors health via heartbeats, triggers rebalancing on failure.
 ```
 
-## What's proven, not just implemented
+## Key properties
 
-- **Raft leader election safety** — at most one leader per term, verified across 200 randomized seeds in the simulated test harness, not just the handful of hand-picked scenarios in the test files.
-- **No double-spend** — two conflicting transactions on the same account are forced into one agreed order by consensus; the state machine deterministically accepts one and rejects the other on every replica.
-- **Leader-kill recovery** — killing the Raft leader mid-transaction elects a new leader and settles outstanding work with no lost or duplicated funds, because `commitIndex`/`lastApplied` are (correctly) never persisted and the ledger state machine's `apply()` is idempotent on `entry_id` — replaying a node's committed log after a crash never double-counts.
-- **Fraud-worker rebalancing** — killing a fraud worker mid-stream causes the consumer group to detect the missed heartbeat and reassign its partitions; no transaction is silently dropped.
-- **A liveness bug that only showed up under real time** — the base Raft paper's algorithm let a partitioned node that spun its term up while isolated disrupt a healthy cluster the instant it reconnected. Fixed with a PreVote phase (`raft/node.py`), the same fix etcd/raft ships in production.
+- **Leader election safety**: at most one leader per term, verified across 200 randomized seeds in a simulated test harness.
+- **No double-spend**: two conflicting transactions on the same account are forced into one agreed order by consensus; the state machine deterministically accepts one and rejects the other on every replica.
+- **Leader-kill recovery**: killing the Raft leader mid-transaction triggers a new election and outstanding work settles correctly, no lost or duplicated funds. `commitIndex`/`lastApplied` are never persisted, and the ledger's `apply()` is idempotent on `entry_id`, so replaying a node's committed log after a crash never double-counts.
+- **Fraud-worker rebalancing**: killing a fraud worker mid-stream causes the consumer group to detect the missed heartbeat and reassign its partitions; no transaction is dropped.
+- **PreVote extension**: the base Raft paper allows a partitioned node to spin its term up indefinitely while isolated, which disrupts a healthy cluster the moment it reconnects. Fixed with a PreVote phase (`raft/node.py`), the same approach etcd/raft uses in production.
 
 ## Repo layout
 
@@ -64,32 +76,34 @@ tests/         ~70 tests across every layer
 ## Demo scenarios
 
 ```bash
-python scripts/demo_fraud_burst.py              # burst of fraud-shaped transactions under load, catch rate
-python scripts/demo_conflicting_transactions.py  # two concurrent debits, same account, no double-spend
-python scripts/demo_kill_leader.py               # kill the Raft leader mid-transaction, verify recovery
+python scripts/demo_fraud_burst.py               # burst of fraud-shaped transactions under load, catch rate
+python scripts/demo_conflicting_transactions.py   # two concurrent debits, same account, no double-spend
+python scripts/demo_kill_leader.py                # kill the Raft leader mid-transaction, verify recovery
 ```
 
 ## Running it
 
 ```bash
 pip install -r requirements-dev.txt
-pytest                          # ~70 tests, in-process + real gRPC-over-localhost
-python scripts/demo_kill_leader.py   # etc.
+pytest                              # ~74 tests, in-process + real gRPC-over-localhost
+python scripts/demo_kill_leader.py  # etc.
 ```
 
-**Real multi-container deployment** (5 Raft nodes + a coordinator, each its own container, talking over real gRPC):
+Multi-container deployment (5 Raft nodes and a coordinator, each its own container, over real gRPC):
 
 ```bash
 docker compose up --build
 ```
 
-## Notable design decisions
+## Design notes
 
-- **Raft's core is deterministic and side-effect-free** (`raft/node.py`): no threads, no sleeps, no sockets — just `tick(now)` and `handle_*(args, now)`, driven externally. That's what makes it possible to test election safety and failure recovery deterministically (`raft/tests/harness.py` single-steps a whole simulated cluster) before ever touching a real thread or socket. The exact same `RaftNode` class runs in-process (threads + `InMemoryTransport`) and over real gRPC (`coordinator/grpc/`) with zero changes to the algorithm.
-- **Partitioning by `account_id`** isn't just a load-balancing choice — it's what guarantees every transaction for a given account is seen by exactly one fraud worker in order (so per-account velocity fraud checks don't need shared state) and, later, lands in Raft entries whose ordering is what actually prevents the double-spend.
-- **At-least-once delivery + idempotent processing = effectively-once**, applied consistently at every hop: fraud scoring commits offsets only after scoring (worker crash → safe reprocessing, deduped downstream by `transaction_id`), and the ledger state machine dedupes on `LedgerEntry.entry_id` (crash → safe log replay).
+**Raft core is deterministic and side-effect-free.** `raft/node.py` has no threads, sleeps, or sockets, just `tick(now)` and `handle_*(args, now)`, driven externally. This allows election safety and failure recovery to be tested deterministically (`raft/tests/harness.py` single-steps a whole simulated cluster) before any real concurrency is introduced. The same `RaftNode` class runs in-process (threads + in-memory transport) and over real gRPC (`coordinator/grpc/`) with no changes to the algorithm.
+
+**Partitioning by `account_id`** guarantees every transaction for a given account is seen by exactly one fraud worker, in order, so per-account velocity checks need no shared state. It also determines the Raft log ordering that prevents double-spends.
+
+**At-least-once delivery + idempotent processing = effectively-once**, applied at every hop. Fraud workers commit stream offsets only after scoring (crash → safe reprocessing, deduped by `transaction_id`). The ledger state machine dedupes on `LedgerEntry.entry_id` (crash → safe log replay).
 
 ## Known limitations
 
-- Only the Raft layer is fully containerized. Fraud workers and the stream broker still run in-process via threads inside the coordinator container — that layer's correctness (partitioning, rebalancing, backpressure) is already fully proven without needing real process/network boundaries the way "kill the leader for real" does for Raft.
-- `TRANSFER`-type transactions settle only the source account's leg; the counterparty credit (atomic multi-account commit) isn't implemented, since none of the three demo scenarios need it.
+- Only the Raft layer is fully containerized. Fraud workers and the stream broker run in-process, via threads, inside the coordinator container.
+- `TRANSFER`-type transactions only settle the source account's leg; the counterparty credit (atomic multi-account commit) isn't implemented.
