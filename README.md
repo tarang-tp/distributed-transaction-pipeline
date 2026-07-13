@@ -13,7 +13,7 @@ Built from scratch: the partitioned log, the consumer-group rebalancing protocol
 ## Quickstart
 
 ```bash
-git clone https://github.com/<your-username>/distributed-transaction-pipeline.git
+git clone https://github.com/tarang-tp/distributed-transaction-pipeline.git
 cd distributed-transaction-pipeline
 pip install -r requirements-dev.txt
 pytest                              # ~74 tests, in-process + real gRPC-over-localhost
