@@ -1,0 +1,15 @@
+[project]
+name = "distributed-tpp"
+version = "0.1.0"
+description = "Distributed transaction processing pipeline: streaming fraud detection + Raft-based settlement"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "raft/tests"]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = [".venv", "coordinator/grpc/raft_pb2.py", "coordinator/grpc/raft_pb2_grpc.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

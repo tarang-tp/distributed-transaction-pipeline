@@ -1,0 +1,4 @@
+-r requirements.txt
+grpcio-tools>=1.60
+pytest>=8.0
+ruff>=0.15
